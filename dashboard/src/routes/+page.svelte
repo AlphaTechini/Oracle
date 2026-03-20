@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   
-  let prices = { BTC: 0, ETH: 0, SOL: 0 };
+  type SupportedSymbol = 'BTC' | 'ETH' | 'SOL';
+  let prices: Record<SupportedSymbol, string | number> = { BTC: 0, ETH: 0, SOL: 0 };
   let loading = true;
 
   async function fetchPrices() {
     try {
-      const symbols = ['BTC', 'ETH', 'SOL'];
+      const symbols: SupportedSymbol[] = ['BTC', 'ETH', 'SOL'];
       for (const sym of symbols) {
         // Fetching from localhost dispatcher in this demo
         const res = await fetch(`http://localhost:3001/prices/${sym}`);
