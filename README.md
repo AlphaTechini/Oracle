@@ -8,6 +8,14 @@ The system is split into three main layers: the On-Chain settlement, the Off-Cha
 
 ```mermaid
 graph TD
+    subgraph "Clients"
+        Web[Web2 Clients / UI]
+    end
+
+    subgraph "API Gateway (Node.js)"
+        Dispatcher[Dispatcher API]
+    end
+
     subgraph "External Data Sources (APIs)"
         B[Binance]
         BF[Bitfinex]
@@ -30,9 +38,14 @@ graph TD
         Registry[Oracle Registry Contract]
     end
 
+    Web -- "/request" --> Dispatcher
+    Dispatcher -- "requestData()" --> Registry
     B & BF & CB & CG & BY --> NodeA & NodeB & NodeC
+    Registry -. "Event: DataRequested" .-> NodeA & NodeB & NodeC
     NodeA & NodeB & NodeC -- "Signed Medians" --> Aggregator
-    Aggregator -- "Fulfill Request" --> Registry
+    Aggregator -- "fulfillRequest()" --> Registry
+    Registry -. "Event: RequestFulfilled" .-> Dispatcher
+    Dispatcher -- "/subscribe (SSE)" --> Web
 ```
 
 ## Architectural Decisions & Tradeoffs
@@ -58,6 +71,7 @@ I'm treating Binance, Bybit, Coinbase, etc., as the primary sources of truth. Th
 - [contracts/](file:///c:/PROJECTS/Oracle/contracts/README.md): Solidity registry, staking, and logic.
 - [server/ingestion/](file:///c:/PROJECTS/Oracle/server/ingestion/README.md): Go Fetcher Node implementation.
 - [server/aggregator/](file:///c:/PROJECTS/Oracle/server/aggregator/README.md): Go Aggregator and consensus logic.
+- [server/dispatcher/](file:///c:/PROJECTS/Oracle/server/dispatcher/README.md): Node.js Client API Gateway for requests/events.
 - [dashboard/](file:///c:/PROJECTS/Oracle/dashboard/README.md): Svelte UI for tracking price feeds and node health.
 
 ## Setup & Installation
