@@ -2,31 +2,45 @@ import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import dotenv from "dotenv";
 import { setupEventListeners } from "./events.js";
-import { requestOracleData } from "./tx.js";
+import { requestOracleData, verifyClientIntent } from "./tx.js";
 import { EventEmitter } from "events";
 
 dotenv.config({ path: "../../.env" });
 
 const fastify = Fastify({ logger: true });
-
-// Event emitter to broadcast on-chain events to SSE clients
 export const internalEventBus = new EventEmitter();
+
+interface RequestBody {
+  symbol: string;
+  timestamp: number;
+  signature: string;
+  clientAddress: string;
+}
 
 async function start() {
   await fastify.register(cors);
 
-  fastify.get("/health", async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get("/health", async () => {
     return { status: "ok", service: "dispatcher-api" };
   });
 
-  // Client Request Endpoint: Initiates an On-Chain Oracle Request
-  fastify.post("/request", async (request: any, reply: FastifyReply) => {
-    const { symbol } = request.body as any;
-    if (!symbol) return reply.code(400).send({ error: "Symbol required" });
+  // Client Request Endpoint (Protects bounty pool with EIP-712)
+  fastify.post("/request", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { symbol, timestamp, signature, clientAddress } = request.body as RequestBody;
+    
+    if (!symbol || !timestamp || !signature || !clientAddress) {
+      return reply.code(400).send({ error: "Missing required EIP-712 fields" });
+    }
+
+    // Protection: Verify the client intent natively before spending Oracle gas
+    const isValid = verifyClientIntent(symbol, timestamp, signature, clientAddress);
+    if (!isValid) {
+      fastify.log.warn(`Invalid EIP-712 signature from ${clientAddress}`);
+      return reply.code(401).send({ error: "Invalid EIP-712 intent signature" });
+    }
     
     try {
-      fastify.log.info(`Client requested data for ${symbol}`);
-      // The dispatcher pays the bounty fee on behalf of the Web2 client (for demo purposes)
+      fastify.log.info(`Verified intent. Sponsoring fetch for ${symbol}`);
       const txHash = await requestOracleData(symbol);
       return { status: "pending", symbol, transactionHash: txHash };
     } catch (err) {
@@ -35,15 +49,17 @@ async function start() {
     }
   });
 
-  // SSE Subscription Endpoint: Clients listen for fulfillment events
-  fastify.get("/subscribe/:symbol", (request: any, reply: FastifyReply) => {
-    const symbol = request.params.symbol;
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "Access-Control-Allow-Origin": "*",
-    });
+  // Server-Sent Events (SSE) Endpoint - Native Fastify Flow
+  fastify.get("/subscribe/:symbol", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { symbol } = request.params as { symbol: string };
+    
+    reply.raw.setHeader('Content-Type', 'text/event-stream');
+    reply.raw.setHeader('Cache-Control', 'no-cache');
+    reply.raw.setHeader('Connection', 'keep-alive');
+    reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Send initial connection header
+    reply.raw.write("retry: 10000\n\n");
 
     const onFulfilled = (data: { reqId: string; symbol: string; price: number }) => {
       if (data.symbol === symbol || symbol === "ALL") {
@@ -59,12 +75,9 @@ async function start() {
   });
 
   try {
-    // Start listening to blockchain events from the DO Network
     await setupEventListeners();
-    
-    // Start HTTP server
     await fastify.listen({ port: 3001, host: "0.0.0.0" });
-    fastify.log.info("Client Dispatcher API running on port 3001");
+    fastify.log.info("Dispatcher API running on port 3001");
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

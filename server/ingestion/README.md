@@ -1,30 +1,17 @@
-# Go Fetcher Node: Multi-Source Data Ingestion
+# Ingestion Fetcher Node
 
-The Fetcher Node is the backbone of the Oracle's data ingestion layer. Each node runs independently, fetching prices from multiple external APIs, calculating a median, and signing the result to prove its authenticity.
+This component is responsible for retrieving real-time cryptocurrency price data from five external APIs concurrently, calculating an internal median, signing it, and sending it to the central Aggregator node.
 
-## Architectural Decisions & Tradeoffs
+## Architectural Tradeoffs & Decisions
 
-### 1. Hybrid Input: WebSockets + REST
-I've designed the fetcher to be as fast as possible without sacrificing reliability.
-- **Decision:** Use a persistent WebSocket for active markets (Binance, Bybit) but include a REST fallback.
-- **Tradeoff:** Managing WebSocket connections in Go requires more boilerplate (goroutines, heartbeats), but it significantly reduces the "latency lag" between the exchange and the oracle.
+1. **Concurrency Model (`sync.WaitGroup` vs Sequential):**
+   - **Previous:** The previous implementation hit all 5 REST APIs sequentially. If one API hung, the node missed the strict 3-second DON SLA.
+   - **Current:** We use standard library `sync.WaitGroup` intertwined with a strict `context.WithTimeout(2 * time.Second)`. All 5 APIs are hit simultaneously. If a single endpoint errors out or delays, it fails safely without dragging down the consensus window.
 
-### 2. Internal Median Calculation
-Before signing, each node calculates its own median price from all 5 sources.
-- **Why:** If one API is down or reporting a "fat finger" error, the median ensures the node's reported price remains accurate. It's the first line of defense against data corruption.
+2. **Communication Protocol (`net/rpc` vs gRPC/HTTP):**
+   - **Decision:** Shifted to standard library `net/rpc` over TCP. 
+   - **Tradeoff:** While gRPC is the industry standard, it requires `protoc` cross-compilation toolchains which can be hostile to local Windows environments. Raw HTTP JSON incurs heavy parsing overhead. `net/rpc` provides identical binary performance natively out-of-the-box using Gob encoding, completely avoiding third-party protobuf dependencies while maintaining high performance.
 
-### 3. ECDSA Signing (`go-ethereum/crypto`)
-Every reported price is cryptographically signed by the node's private key.
-- **Decision:** Use standard ECDSA (secp256k1).
-- **Why:** This allows the Solidity contract to verify exactly which node provided which data, preventing any "man-in-the-middle" attacks between the fetcher and the aggregator.
-
-## Setup & Running
-
-Individual nodes can be configured using environment variables:
-- `PRIVATE_KEY`: The node's Ethereum private key.
-- `NODE_ADDRESS`: The corresponding public address.
-- `RPC_URL`: Connection to the Ethereum network.
-
-```powershell
-go run main.go
-```
+3. **Event Ingestion (WebSockets vs Polling):**
+   - **Decision:** Replaced the 10-second sleep polling model with EVM WebSocket Subscriptions (`ethclient.SubscribeFilterLogs`).
+   - **Tradeoff:** WebSockets require persistent connections and can be fragile if the internal node drops. However, polling adds unacceptable artificial latency (up to 10s delay). WSS allows the node to begin fetching data the precise millisecond a client requests it on-chain.

@@ -1,27 +1,17 @@
-# Go Aggregator: Network Consensus & Submission
+# Aggregator Node
 
-The Aggregator is the router of the Oracle Network. It collects signed reports from multiple Fetcher Nodes, calculates the network-wide consensus, and submits the final transaction to the Solidity registry.
+The Aggregator acts as the consensus router for the Decentralized Oracle Network (DON).
 
-## Architectural Decisions & Tradeoffs
+## Architectural Tradeoffs & Decisions
 
-### 1. Simple Deviation Filtering (The 0.2% Rule)
-I've implemented a strict filtering rule to ensure high-quality data.
-- **Decision:** Any node whose price deviates by more than 0.2% from the network median is marked as "Slashed".
-- **Tradeoff:** This might be tight for extremely volatile assets, but for major pairs (BTC/ETH), it effectively filters out noise and bad actors.
+1. **Protocol (RPC vs HTTP):**
+   - **Decision:** The nodes connect to the Aggregator using `net/rpc` over standard TCP instead of REST endpoints.
+   - **Tradeoff:** It removes the need to parse JSON overhead on every single node report, crucial for a high-throughput network handling thousands of data points a second.
 
-### 2. Aggregator Rotation Logic
-The aggregator is not a single fixed server. 
-- **Decision:** The Solidity contract deterministically picks which node should act as the aggregator for a specific `requestId`.
-- **Tradeoff:** This requires nodes to monitor the chain and "know" when it's their turn to aggregate. It adds some complexity to the Go code but removes the central point of failure.
+2. **Consensus Timing (Channel Multiplexing vs Batching):**
+   - **Decision:** As soon as the *first* node reports a price for a specific Request, a strict 3-second `time.Sleep` goroutine is spawned to define a consensus window.
+   - **Tradeoff:** This ensures the Oracle responds strictly within the SLA defined in the PRD (3 seconds). If nodes are too slow to hit the 3-second hard deadline, they are simply excluded from that round's snapshot.
 
-### 3. Replacing the Node.js Dispatcher
-I moved the aggregation and submission logic from Node.js to Go.
-- **Why:** Go's concurrency model (goroutines/channels) is better suited for handling dozens of node responses simultaneously. Plus, having the entire off-chain stack in one language (Go) makes it easier to manage dependencies and maintenance.
-
-## Consensus Algorithm
-
-1. **Collect:** Wait for node responses (up to 3 seconds).
-2. **Sort:** Order all `internalMedianPrice` values.
-3. **Calculate:** Find the Network Median.
-4. **Filter:** Categorize into `HonestNodes` and `SlashedNodes`.
-5. **Submit:** Execute `fulfillRequest(...)` on-chain.
+3. **Signature Validation (Aggregator Authority vs Fully decentralized Smart Contract Verifiers):**
+   - **Decision:** The network uses a trusted Aggregator pattern where the on-chain contract simply verifies the final price was signed by the registered round-robin Aggregator, rather than the contract verifying all 5 individual node signatures (`ecrecover` loop).
+   - **Tradeoff:** Fully decentralized validation of an array of ECDSA signatures on the EVM costs thousands of gas ($O(n)$ footprint), leading to unscalable networks. Validating a single Aggregator (which proves off-chain consensus was reached) costs only $O(1)$ gas. This aligns perfectly with off-chain computation models like CCIP and OCR.

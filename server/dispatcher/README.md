@@ -1,26 +1,17 @@
-# Node.js Dispatcher: Client API Gateway
+# Dispatcher Node.js API
 
-The Dispatcher serves as the bridge between Web2 clients (like a frontend UI) and the Web3 Decentralized Oracle Network. 
+The Dispatcher API acts as the client-facing gateway (Web2 to Web3) for to the Decentralized Oracle Network.
 
-In a true Chainlink-like architecture, clients need a way to easily trigger jobs or subscribe to data feeds without managing raw blockchain transactions themselves. This API Gateway provides that interface.
+## Architectural Tradeoffs & Decisions
 
-## Core Features
+1. **Framework (Fastify vs Express):**
+   - **Decision:** As per project guidelines, this API strictly uses Fastify.
+   - **Tradeoff:** Fastify provides significantly higher throughput (requests per second) than Express natively, which is crucial for an Oracle gateway that might be spammed by Web2 clients.
 
-### 1. Requesting Data (`POST /request`)
-Clients can hit this endpoint to request a price update for a specific symbol. 
-- **Action:** The Dispatcher uses its own funded wallet to call `requestData()` on the `OracleRegistry` contract, paying the `bountyFee` on behalf of the client.
-- **Result:** Emits a `DataRequested` event on-chain, waking up the Go Fetcher Nodes.
+2. **Client Authentication (EIP-712 Intent vs On-Chain Allowance):**
+   - **Decision:** The API requires clients to submit an **EIP-712** typed signature with their request. The API verifies this signature *off-chain* before paying the on-chain bounty on behalf of the client (acting as a Relayer). 
+   - **Tradeoff:** If we required on-chain `ERC20.approve` and `transferFrom`, clients would have to pay their own gas just to request data. By using the Relayer pattern protected by EIP-712, the API provides a seamless Web2 "gasless" experience for authorized clients, while mathematically blocking unauthorized bot spam from draining the relayer's gas pool.
 
-### 2. Subscribing to Fulfillments (`GET /subscribe/:symbol`)
-Clients can establish a Server-Sent Events (SSE) connection to listen for price updates in real-time.
-- **Action:** The Dispatcher listens to the `RequestFulfilled` event from the `OracleRegistry` contract.
-- **Result:** Pushes the finalized, consensus-agreed price back to the Web2 client via the open connection.
-
-## Setup & Running
-
-Copy your `.env` variables, ensuring `DISPATCHER_PRIVATE_KEY` and `ORACLE_CONTRACT_ADDRESS` are set.
-
-```powershell
-pnpm install
-pnpm dev
-```
+3. **Client Subscriptions (Server-Sent Events vs WebSockets vs Polling):**
+   - **Decision:** Chosen **Server-Sent Events (SSE)** via `fastify` raw responses over full bidirectional WebSockets.
+   - **Tradeoff:** Since the client only needs to *listen* for the finalized price (unidirectional data flow: Server -> Client), SSE is much lighter than WebSockets, works natively over HTTP/1.1 and HTTP/2, and natively handles auto-reconnections in browsers (`EventSource`). Polling was discarded as it introduces artificial latency.

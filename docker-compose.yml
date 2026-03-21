@@ -1,38 +1,69 @@
 version: '3.8'
 
 services:
+  hardhat-node:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./contracts:/app
+    command: /bin/sh -c "npm install -g pnpm && pnpm install && npx hardhat node --hostname 0.0.0.0"
+    ports:
+      - "8545:8545"
+    restart: always
+
   aggregator:
     build:
       context: ./server/aggregator
     env_file:
       - .env
     environment:
-      - RPC_URL=http://hardhat:8545
-      - REGISTRY_ADDR=0x...
+      - HTTP_RPC_URL=http://hardhat-node:8545
+      - ORACLE_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+      - AGGREGATOR_PORT=4000
+    depends_on:
+      - hardhat-node
     restart: always
 
   fetcher-1:
     build:
       context: ./server/ingestion
+    env_file:
+      - .env
     environment:
-      - NODE_ID=1
-      - PRIVATE_KEY=0x...
+      - WS_RPC_URL=ws://hardhat-node:8545
+      - AGGREGATOR_RPC_URL=aggregator:4000
+      - NODE_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+    depends_on:
+      - hardhat-node
+      - aggregator
     restart: always
 
   fetcher-2:
     build:
       context: ./server/ingestion
+    env_file:
+      - .env
     environment:
-      - NODE_ID=2
-      - PRIVATE_KEY=0x...
+      - WS_RPC_URL=ws://hardhat-node:8545
+      - AGGREGATOR_RPC_URL=aggregator:4000
+      - NODE_PRIVATE_KEY=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a
+    depends_on:
+      - hardhat-node
+      - aggregator
     restart: always
 
   fetcher-3:
     build:
       context: ./server/ingestion
+    env_file:
+      - .env
     environment:
-      - NODE_ID=3
-      - PRIVATE_KEY=0x...
+      - WS_RPC_URL=ws://hardhat-node:8545
+      - AGGREGATOR_RPC_URL=aggregator:4000
+      - NODE_PRIVATE_KEY=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6
+    depends_on:
+      - hardhat-node
+      - aggregator
     restart: always
 
   dispatcher:
@@ -41,7 +72,10 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - RPC_URL=http://hardhat-node:8545
+      - ORACLE_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
     ports:
       - "3001:3001"
+    depends_on:
+      - hardhat-node
     restart: always
