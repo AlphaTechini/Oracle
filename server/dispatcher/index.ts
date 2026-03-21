@@ -1,4 +1,4 @@
-import Fastify from "fastify";
+import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import dotenv from "dotenv";
 import { setupEventListeners } from "./events.js";
@@ -15,13 +15,13 @@ export const internalEventBus = new EventEmitter();
 async function start() {
   await fastify.register(cors);
 
-  fastify.get("/health", async (request, reply) => {
+  fastify.get("/health", async (request: FastifyRequest, reply: FastifyReply) => {
     return { status: "ok", service: "dispatcher-api" };
   });
 
   // Client Request Endpoint: Initiates an On-Chain Oracle Request
-  fastify.post("/request", async (request: any, reply) => {
-    const { symbol } = request.body;
+  fastify.post("/request", async (request: any, reply: FastifyReply) => {
+    const { symbol } = request.body as any;
     if (!symbol) return reply.code(400).send({ error: "Symbol required" });
     
     try {
@@ -36,7 +36,7 @@ async function start() {
   });
 
   // SSE Subscription Endpoint: Clients listen for fulfillment events
-  fastify.get("/subscribe/:symbol", (request: any, reply) => {
+  fastify.get("/subscribe/:symbol", (request: any, reply: FastifyReply) => {
     const symbol = request.params.symbol;
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
