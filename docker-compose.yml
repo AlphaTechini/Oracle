@@ -1,37 +1,36 @@
 version: '3.8'
 
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    command: redis-server --save 60 1 --loglevel warning
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  ingestion:
+  aggregator:
     build:
-      context: ./server/ingestion
-    environment:
-      - REDIS_URL=redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: always
-
-  dispatcher:
-    build:
-      context: ./server/dispatcher
+      context: ./server/aggregator
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379
-    ports:
-      - "3001:3001"
-    depends_on:
-      redis:
-        condition: service_healthy
+      - RPC_URL=http://hardhat:8545
+      - REGISTRY_ADDR=0x...
+    restart: always
+
+  fetcher-1:
+    build:
+      context: ./server/ingestion
+    environment:
+      - NODE_ID=1
+      - PRIVATE_KEY=0x...
+    restart: always
+
+  fetcher-2:
+    build:
+      context: ./server/ingestion
+    environment:
+      - NODE_ID=2
+      - PRIVATE_KEY=0x...
+    restart: always
+
+  fetcher-3:
+    build:
+      context: ./server/ingestion
+    environment:
+      - NODE_ID=3
+      - PRIVATE_KEY=0x...
     restart: always
