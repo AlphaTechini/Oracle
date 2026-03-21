@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -97,21 +98,40 @@ func (s BybitSource) FetchPrice(ctx context.Context, symbol string) (float64, er
 	return price, nil
 }
 
-// FetchMedian fetches prices from all sources and returns the median scaled by 10^8
+// FetchMedian fetches prices concurrently from all sources and returns the median scaled by 10^8
 func FetchMedian(symbol string) uint64 {
 	sources := []PriceSource{BinanceSource{}, BitfinexSource{}, CoinbaseSource{}, CoinGeckoSource{}, BybitSource{}}
-	prices := []float64{}
+	var prices []float64
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	for _, s := range sources {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		price, err := s.FetchPrice(ctx, symbol)
-		cancel()
-		if err == nil {
+		wg.Add(1)
+		go func(source PriceSource) {
+			defer wg.Done()
+			
+			price, err := source.FetchPrice(ctx, symbol)
+			if err != nil {
+				log.Printf("[%s] Fetch Error: %v", source.Name(), err)
+				return
+			}
+			
+			mu.Lock()
 			prices = append(prices, price)
-		} else {
-			log.Printf("[%s] Fetch Error: %v", s.Name(), err)
-		}
+			mu.Unlock()
+		}(s) // Pass loop variable securely to prevent data races
 	}
-	if len(prices) == 0 { return 0 }
+
+	wg.Wait()
+
+	if len(prices) == 0 { 
+		return 0 
+	}
+	
 	sort.Float64s(prices)
 	median := prices[len(prices)/2]
 	return uint64(math.Round(median * PriceScale))
