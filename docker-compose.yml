@@ -34,3 +34,14 @@ services:
       - NODE_ID=3
       - PRIVATE_KEY=0x...
     restart: always
+
+  dispatcher:
+    build:
+      context: ./server/dispatcher
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "3001:3001"
+    restart: always
