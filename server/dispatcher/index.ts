@@ -12,12 +12,23 @@ export const internalEventBus = new EventEmitter();
 
 interface RequestBody {
   symbol: string;
+  name: string;
   timestamp: number;
   signature: string;
   clientAddress: string;
 }
 
+function validateEnv() {
+  const required = ["RPC_URL", "DISPATCHER_PRIVATE_KEY", "ORACLE_CONTRACT_ADDRESS"];
+  const missing = required.filter(k => !process.env[k]);
+  if (missing.length > 0) {
+    console.warn(`\x1b[33m[WARNING] Missing environment variables: ${missing.join(", ")}\x1b[0m`);
+    console.warn("\x1b[33m[WARNING] Server may not function correctly with default values.\x1b[0m");
+  }
+}
+
 async function start() {
+  validateEnv();
   await fastify.register(cors);
 
   fastify.get("/health", async () => {
@@ -26,23 +37,23 @@ async function start() {
 
   // Client Request Endpoint (Protects bounty pool with EIP-712)
   fastify.post("/request", async (request: FastifyRequest, reply: FastifyReply) => {
-    const { symbol, timestamp, signature, clientAddress } = request.body as RequestBody;
+    const { symbol, name, timestamp, signature, clientAddress } = request.body as RequestBody;
     
-    if (!symbol || !timestamp || !signature || !clientAddress) {
-      return reply.code(400).send({ error: "Missing required EIP-712 fields" });
+    if (!symbol || !name || !timestamp || !signature || !clientAddress) {
+      return reply.code(400).send({ error: "Missing required EIP-712 fields (symbol, name, timestamp, signature, clientAddress)" });
     }
 
     // Protection: Verify the client intent natively before spending Oracle gas
-    const isValid = verifyClientIntent(symbol, timestamp, signature, clientAddress);
+    const isValid = verifyClientIntent(symbol, name, timestamp, signature, clientAddress);
     if (!isValid) {
       fastify.log.warn(`Invalid EIP-712 signature from ${clientAddress}`);
       return reply.code(401).send({ error: "Invalid EIP-712 intent signature" });
     }
     
     try {
-      fastify.log.info(`Verified intent. Sponsoring fetch for ${symbol}`);
-      const txHash = await requestOracleData(symbol);
-      return { status: "pending", symbol, transactionHash: txHash };
+      fastify.log.info(`Verified intent. Sponsoring fetch for ${symbol} (${name})`);
+      const txHash = await requestOracleData(symbol, name);
+      return { status: "pending", symbol, name, transactionHash: txHash };
     } catch (err) {
       fastify.log.error(err);
       return reply.code(500).send({ error: "Failed to request price on-chain" });

@@ -12,9 +12,9 @@ export const signer = new ethers.Wallet(privateKey, provider);
 
 // OracleRegistry ABI
 export const OracleABI = [
-  "event DataRequested(bytes32 indexed reqId, string symbol, uint256 bounty)",
+  "event DataRequested(bytes32 indexed reqId, string symbol, string name, uint256 bounty)",
   "event RequestFulfilled(bytes32 indexed reqId, uint256 consensusPrice, address aggregator)",
-  "function requestData(string calldata symbol) external payable returns (bytes32)"
+  "function requestData(string calldata symbol, string calldata name) external payable returns (bytes32)"
 ];
 
 const contractAddress = process.env.ORACLE_CONTRACT_ADDRESS || ethers.ZeroAddress;
@@ -31,6 +31,7 @@ const domain = {
 const types = {
   DataRequest: [
     { name: "symbol", type: "string" },
+    { name: "name", type: "string" },
     { name: "timestamp", type: "uint256" }
   ]
 };
@@ -38,9 +39,9 @@ const types = {
 /**
  * Validates an EIP-712 signature from a client.
  */
-export function verifyClientIntent(symbol: string, timestamp: number, signature: string, expectedSigner: string): boolean {
+export function verifyClientIntent(symbol: string, name: string, timestamp: number, signature: string, expectedSigner: string): boolean {
   try {
-    const value = { symbol, timestamp };
+    const value = { symbol, name, timestamp };
     const recoveredAddress = ethers.verifyTypedData(domain, types, value, signature);
     return recoveredAddress.toLowerCase() === expectedSigner.toLowerCase();
   } catch (err) {
@@ -52,13 +53,13 @@ export function verifyClientIntent(symbol: string, timestamp: number, signature:
 /**
  * Initiates an on-chain data request using the dispatcher's wallet.
  */
-export async function requestOracleData(symbol: string): Promise<string> {
+export async function requestOracleData(symbol: string, name: string): Promise<string> {
   try {
-    console.log(`Submitting on-chain request for ${symbol}...`);
+    console.log(`Submitting on-chain request for ${symbol} (${name})...`);
     
     // Dispatcher pays the bounty fee on behalf of the client
     const bountyFee = ethers.parseEther("0.01"); 
-    const tx = await oracleContract.requestData(symbol, {
+    const tx = await oracleContract.requestData(symbol, name, {
       value: bountyFee,
       gasLimit: 300000
     });

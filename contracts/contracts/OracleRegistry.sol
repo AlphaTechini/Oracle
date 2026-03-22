@@ -29,6 +29,7 @@ contract OracleRegistry {
     struct Request {
         address client;
         string symbol;
+        string name;
         uint256 bountyFee;
         bool resolved;
     }
@@ -43,7 +44,7 @@ contract OracleRegistry {
     
     // --- Events ---
     event NodeRegistered(address indexed node, uint256 stake);
-    event DataRequested(bytes32 indexed reqId, string symbol, uint256 bounty);
+    event DataRequested(bytes32 indexed reqId, string symbol, string name, uint256 bounty);
     event RequestFulfilled(bytes32 indexed reqId, uint256 consensusPrice, address aggregator);
     event NodeSlashed(address indexed node, uint256 amountSlashed);
 
@@ -113,19 +114,20 @@ contract OracleRegistry {
     /**
      * @dev Request data for a specific symbol. Client must send bountyFee as msg.value.
      */
-    function requestData(string calldata symbol) external payable nonReentrant returns (bytes32) {
+    function requestData(string calldata symbol, string calldata name) external payable nonReentrant returns (bytes32) {
         if (msg.value == 0) revert BountyRequired();
         
-        bytes32 reqId = keccak256(abi.encodePacked(symbol, msg.sender, block.timestamp));
+        bytes32 reqId = keccak256(abi.encodePacked(symbol, name, msg.sender, block.timestamp));
         
         requests[reqId] = Request({
             client: msg.sender,
             symbol: symbol,
+            name: name,
             bountyFee: msg.value,
             resolved: false
         });
 
-        emit DataRequested(reqId, symbol, msg.value);
+        emit DataRequested(reqId, symbol, name, msg.value);
         return reqId;
     }
 

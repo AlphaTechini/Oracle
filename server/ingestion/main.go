@@ -27,8 +27,18 @@ type SubmitResponse struct {
 	Message string
 }
 
+func validateEnv() {
+	required := []string{"WS_RPC_URL", "NODE_PRIVATE_KEY", "ORACLE_CONTRACT_ADDRESS", "AGGREGATOR_RPC_URL"}
+	for _, env := range required {
+		if os.Getenv(env) == "" {
+			log.Printf("\x1b[33m[WARNING] Environment variable %s is not set. Using default value.\x1b[0m", env)
+		}
+	}
+}
+
 func main() {
 	log.Println("Starting Decentralized Oracle Fetcher Node...")
+	validateEnv()
 
 	// 1. Configuration (In production, load via .env / os.Getenv)
 	rpcURL := "ws://127.0.0.1:8545" // Target local Anvil/Hardhat node
@@ -62,8 +72,8 @@ func main() {
 		log.Fatalf("Failed to connect to Ethereum Client via WSS: %v", err)
 	}
 
-	// keccak256("DataRequested(bytes32,string,uint256)")
-	eventSignature := []byte("DataRequested(bytes32,string,uint256)")
+	// keccak256("DataRequested(bytes32,string,string,uint256)")
+	eventSignature := []byte("DataRequested(bytes32,string,string,uint256)")
 	eventTopic := crypto.Keccak256Hash(eventSignature)
 
 	query := ethereum.FilterQuery{
@@ -89,22 +99,43 @@ func main() {
 			}
 			reqId := vLog.Topics[1]
 
-			// Note: The fully unABI-decoded symbol is stored in the data segment.
-			// Since we just need the symbol, for string calldata it has dynamic offset.
-			// For simplicity in this DON without abigen, we parse the raw data buffer.
-			// The data layout is: Offset(32), Bounty(32), Length(32), StringData.
+			// Note: The fully unABI-decoded symbol and name are stored in the data segment.
+			// The data layout for (string symbol, string name, uint256 bounty) is:
+			// [0:32] symbol offset
+			// [32:64] name offset
+			// [64:96] bounty
+			// [96:128] symbol length
+			// [128:...] symbol data (padded)
+			// [...] name length
+			// [...] name data (padded)
+			
 			dataBuf := vLog.Data
-			if len(dataBuf) < 128 {
+			if len(dataBuf) < 160 {
 				continue
 			}
-			symbolLen := int(dataBuf[95]) // simple parse for short symbols
+			
+			// Simple parse for short strings (assuming they fit within the first few slots)
+			symbolLen := int(dataBuf[95])
+			if symbolLen > 32 { symbolLen = 32 } // sanity check for simple parse
 			symbol := string(dataBuf[96 : 96+symbolLen])
 
-			log.Printf("Received Request! ReqId: %x, Symbol: %s", reqId.Bytes(), symbol)
+			// Name starts after symbol padding (32-byte chunks)
+			nameOffset := 96 + 32*((symbolLen+31)/32) + 31
+			if len(dataBuf) <= nameOffset {
+				continue
+			}
+			nameLen := int(dataBuf[nameOffset])
+			nameDataStart := nameOffset + 1
+			if len(dataBuf) < nameDataStart+nameLen {
+				continue
+			}
+			name := string(dataBuf[nameDataStart : nameDataStart+nameLen])
+
+			log.Printf("Received Request! ReqId: %x, Symbol: %s, Name: %s", reqId.Bytes(), symbol, name)
 
 			// 3. Fetch Prices Concurrently
-			median := FetchMedian(symbol)
-			log.Printf("Calculated internal median for %s: %d", symbol, median)
+			median := FetchMedian(symbol, name)
+			log.Printf("Calculated internal median for %s (%s): %d", symbol, name, median)
 
 			if median == 0 {
 				log.Printf("Failed to fetch median for %s", symbol)

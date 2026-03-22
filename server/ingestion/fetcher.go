@@ -31,7 +31,11 @@ const PriceScale = 100000000
 type BinanceSource struct{}
 func (s BinanceSource) Name() string { return "Binance" }
 func (s BinanceSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%sUSDT", symbol)
+	baseCurrency := os.Getenv("BASE_CURRENCY")
+	if baseCurrency == "" {
+		baseCurrency = "USDT"
+	}
+	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s%s", symbol, baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -45,6 +49,7 @@ func (s BinanceSource) FetchPrice(ctx context.Context, symbol string) (float64, 
 type BitfinexSource struct{}
 func (s BitfinexSource) Name() string { return "Bitfinex" }
 func (s BitfinexSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
+	// Bitfinex uses USD for spot, symbols prefixed with 't'
 	url := fmt.Sprintf("https://api-pub.bitfinex.com/v2/ticker/t%sUSD", symbol)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
@@ -69,24 +74,38 @@ func (s CoinbaseSource) FetchPrice(ctx context.Context, symbol string) (float64,
 	return price, nil
 }
 
-type CoinGeckoSource struct{}
+type CoinGeckoSource struct{
+	TokenName string
+}
 func (s CoinGeckoSource) Name() string { return "CoinGecko" }
 func (s CoinGeckoSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	idMap := map[string]string{"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
-	id := idMap[symbol]
+	// Use the passed name if available, otherwise fallback to symbol lowercase
+	id := strings.ToLower(s.TokenName)
+	if id == "" {
+		id = strings.ToLower(symbol)
+	}
+	
 	url := fmt.Sprintf("https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd", id)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
 	var data map[string]map[string]float64
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil { return 0, err }
-	return data[id]["usd"], nil
+	
+	if val, ok := data[id]["usd"]; ok {
+		return val, nil
+	}
+	return 0, fmt.Errorf("id %s not found in coingecko response", id)
 }
 
 type BybitSource struct{}
 func (s BybitSource) Name() string { return "Bybit" }
 func (s BybitSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=spot&symbol=%sUSDT", symbol)
+	baseCurrency := os.Getenv("BASE_CURRENCY")
+	if baseCurrency == "" {
+		baseCurrency = "USDT"
+	}
+	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=spot&symbol=%s%s", symbol, baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -99,8 +118,14 @@ func (s BybitSource) FetchPrice(ctx context.Context, symbol string) (float64, er
 }
 
 // FetchMedian fetches prices concurrently from all sources and returns the median scaled by 10^8
-func FetchMedian(symbol string) uint64 {
-	sources := []PriceSource{BinanceSource{}, BitfinexSource{}, CoinbaseSource{}, CoinGeckoSource{}, BybitSource{}}
+func FetchMedian(symbol string, name string) uint64 {
+	sources := []PriceSource{
+		BinanceSource{}, 
+		BitfinexSource{}, 
+		CoinbaseSource{}, 
+		CoinGeckoSource{TokenName: name}, 
+		BybitSource{},
+	}
 	var prices []float64
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -123,7 +148,7 @@ func FetchMedian(symbol string) uint64 {
 			mu.Lock()
 			prices = append(prices, price)
 			mu.Unlock()
-		}(s) // Pass loop variable securely to prevent data races
+		}(s)
 	}
 
 	wg.Wait()

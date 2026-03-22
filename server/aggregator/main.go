@@ -194,8 +194,18 @@ func (a *Aggregator) submitToBlockchain(reqId [32]byte, median uint64, honest []
 	log.Printf("Consensus Tx Sent! Hash: %s", tx.Hash().Hex())
 }
 
+func validateEnv() {
+	required := []string{"HTTP_RPC_URL", "AGGREGATOR_PRIVATE_KEY", "ORACLE_CONTRACT_ADDRESS"}
+	for _, env := range required {
+		if os.Getenv(env) == "" {
+			log.Printf("\x1b[33m[WARNING] Environment variable %s is not set. Using default value.\x1b[0m", env)
+		}
+	}
+}
+
 func main() {
 	log.Println("DON Aggregator Node starting...")
+	validateEnv()
 
 	rpcURL := "http://127.0.0.1:8545"
 	if envURL := os.Getenv("HTTP_RPC_URL"); envURL != "" {
