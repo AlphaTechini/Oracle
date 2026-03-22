@@ -114,7 +114,7 @@ contract OracleRegistry {
     /**
      * @dev Request data for a specific symbol. Client must send bountyFee as msg.value.
      */
-    function requestData(string calldata symbol, string calldata name) external payable nonReentrant returns (bytes32) {
+    function requestData(string calldata symbol, string calldata name) public payable nonReentrant returns (bytes32) {
         if (msg.value == 0) revert BountyRequired();
         
         bytes32 reqId = keccak256(abi.encodePacked(symbol, name, msg.sender, block.timestamp));
@@ -129,6 +129,32 @@ contract OracleRegistry {
 
         emit DataRequested(reqId, symbol, name, msg.value);
         return reqId;
+    }
+
+    /**
+     * @dev Batch request data for multiple symbols.
+     */
+    function requestDataBatch(string[] calldata symbols, string[] calldata names) external payable nonReentrant {
+        uint256 count = symbols.length;
+        if (count == 0) revert BountyRequired();
+        if (count != names.length) revert ("Symbols and names length mismatch");
+        
+        uint256 feePerRequest = msg.value / count;
+        if (feePerRequest == 0) revert BountyRequired();
+
+        for (uint256 i = 0; i < count; i++) {
+            bytes32 reqId = keccak256(abi.encodePacked(symbols[i], names[i], msg.sender, block.timestamp, i));
+            
+            requests[reqId] = Request({
+                client: msg.sender,
+                symbol: symbols[i],
+                name: names[i],
+                bountyFee: feePerRequest,
+                resolved: false
+            });
+
+            emit DataRequested(reqId, symbols[i], names[i], feePerRequest);
+        }
     }
 
     /**

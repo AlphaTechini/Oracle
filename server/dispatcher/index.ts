@@ -2,7 +2,7 @@ import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import dotenv from "dotenv";
 import { setupEventListeners } from "./events.js";
-import { requestOracleData, verifyClientIntent } from "./tx.js";
+import { requestOracleData, requestOracleDataBatch, verifyClientIntent, verifyBatchClientIntent } from "./tx.js";
 import { EventEmitter } from "events";
 
 dotenv.config({ path: "../../.env" });
@@ -13,6 +13,13 @@ export const internalEventBus = new EventEmitter();
 interface RequestBody {
   symbol: string;
   name: string;
+  timestamp: number;
+  signature: string;
+  clientAddress: string;
+}
+
+interface BatchRequestBody {
+  tokens: { symbol: string; name: string }[];
   timestamp: number;
   signature: string;
   clientAddress: string;
@@ -33,6 +40,35 @@ async function start() {
 
   fastify.get("/health", async () => {
     return { status: "ok", service: "dispatcher-api" };
+  });
+
+  // Client Batch Request Endpoint
+  fastify.post("/batch-request", async (request: FastifyRequest, reply: FastifyReply) => {
+    const { tokens, timestamp, signature, clientAddress } = request.body as BatchRequestBody;
+    
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0 || !timestamp || !signature || !clientAddress) {
+      return reply.code(400).send({ error: "Missing required fields (tokens[], timestamp, signature, clientAddress)" });
+    }
+
+    if (tokens.length > 30) {
+      return reply.code(400).send({ error: "Batch size exceeds maximum limit of 30 tokens" });
+    }
+
+    // Verify EIP-712 Batch signature
+    const isValid = verifyBatchClientIntent(tokens, timestamp, signature, clientAddress);
+    if (!isValid) {
+      fastify.log.warn(`Invalid Batch EIP-712 signature from ${clientAddress}`);
+      return reply.code(401).send({ error: "Invalid Batch EIP-712 intent signature" });
+    }
+    
+    try {
+      fastify.log.info(`Verified batch intent. Sponsoring fetch for ${tokens.length} tokens`);
+      const txHash = await requestOracleDataBatch(tokens);
+      return { status: "pending", tokens: tokens.map(t => t.symbol), transactionHash: txHash };
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.code(500).send({ error: "Failed to request batch price on-chain" });
+    }
   });
 
   // Client Request Endpoint (Protects bounty pool with EIP-712)

@@ -14,7 +14,8 @@ export const signer = new ethers.Wallet(privateKey, provider);
 export const OracleABI = [
   "event DataRequested(bytes32 indexed reqId, string symbol, string name, uint256 bounty)",
   "event RequestFulfilled(bytes32 indexed reqId, uint256 consensusPrice, address aggregator)",
-  "function requestData(string calldata symbol, string calldata name) external payable returns (bytes32)"
+  "function requestData(string calldata symbol, string calldata name) external payable returns (bytes32)",
+  "function requestDataBatch(string[] calldata symbols, string[] calldata names) external payable"
 ];
 
 const contractAddress = process.env.ORACLE_CONTRACT_ADDRESS || ethers.ZeroAddress;
@@ -28,13 +29,40 @@ const domain = {
   verifyingContract: contractAddress
 };
 
+interface TokenRequest {
+  symbol: string;
+  name: string;
+}
+
 const types = {
   DataRequest: [
     { name: "symbol", type: "string" },
     { name: "name", type: "string" },
     { name: "timestamp", type: "uint256" }
+  ],
+  BatchDataRequest: [
+    { name: "tokens", type: "TokenRequest[]" },
+    { name: "timestamp", type: "uint256" }
+  ],
+  TokenRequest: [
+    { name: "symbol", type: "string" },
+    { name: "name", type: "string" }
   ]
 };
+
+/**
+ * Validates an EIP-712 signature for a batch request.
+ */
+export function verifyBatchClientIntent(tokens: TokenRequest[], timestamp: number, signature: string, expectedSigner: string): boolean {
+  try {
+    const value = { tokens, timestamp };
+    const recoveredAddress = ethers.verifyTypedData(domain, types, value, signature);
+    return recoveredAddress.toLowerCase() === expectedSigner.toLowerCase();
+  } catch (err) {
+    console.error("Batch EIP-712 Verification failed:", err);
+    return false;
+  }
+}
 
 /**
  * Validates an EIP-712 signature from a client.
@@ -68,6 +96,31 @@ export async function requestOracleData(symbol: string, name: string): Promise<s
     return tx.hash;
   } catch (err) {
     console.error(`Error requesting data for ${symbol}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Initiates an on-chain batch data request.
+ */
+export async function requestOracleDataBatch(tokens: TokenRequest[]): Promise<string> {
+  try {
+    const symbols = tokens.map(t => t.symbol);
+    const names = tokens.map(t => t.name);
+    
+    console.log(`Submitting on-chain batch request for ${symbols.join(", ")}...`);
+    
+    // Dispatcher pays the bounty fee per request
+    const totalBounty = ethers.parseEther((0.01 * tokens.length).toString()); 
+    const tx = await oracleContract.requestDataBatch(symbols, names, {
+      value: totalBounty,
+      gasLimit: 500000 + (100000 * tokens.length) // Dynamic gas based on batch size
+    });
+
+    console.log(`Batch request submitted! Hash: ${tx.hash}`);
+    return tx.hash;
+  } catch (err) {
+    console.error(`Error requesting batch data:`, err);
     throw err;
   }
 }
