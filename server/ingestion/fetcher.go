@@ -30,11 +30,11 @@ const PriceScale = 100000000
 type BinanceSource struct{}
 func (s BinanceSource) Name() string { return "Binance" }
 func (s BinanceSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	baseCurrency := os.Getenv("BASE_CURRENCY")
+	baseCurrency := strings.ToUpper(os.Getenv("BASE_CURRENCY"))
 	if baseCurrency == "" {
 		baseCurrency = "USDT"
 	}
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s%s", symbol, baseCurrency)
+	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s%s", strings.ToUpper(symbol), baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -49,7 +49,7 @@ type BitfinexSource struct{}
 func (s BitfinexSource) Name() string { return "Bitfinex" }
 func (s BitfinexSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
 	// Bitfinex uses USD for spot, symbols prefixed with 't'
-	url := fmt.Sprintf("https://api-pub.bitfinex.com/v2/ticker/t%sUSD", symbol)
+	url := fmt.Sprintf("https://api-pub.bitfinex.com/v2/ticker/t%sUSD", strings.ToUpper(symbol))
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -62,7 +62,7 @@ func (s BitfinexSource) FetchPrice(ctx context.Context, symbol string) (float64,
 type CoinbaseSource struct{}
 func (s CoinbaseSource) Name() string { return "Coinbase" }
 func (s CoinbaseSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	url := fmt.Sprintf("https://api.coinbase.com/v2/prices/%s-USD/spot", symbol)
+	url := fmt.Sprintf("https://api.coinbase.com/v2/prices/%s-USD/spot", strings.ToUpper(symbol))
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -100,11 +100,11 @@ func (s CoinGeckoSource) FetchPrice(ctx context.Context, symbol string) (float64
 type BybitSource struct{}
 func (s BybitSource) Name() string { return "Bybit" }
 func (s BybitSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	baseCurrency := os.Getenv("BASE_CURRENCY")
+	baseCurrency := strings.ToUpper(os.Getenv("BASE_CURRENCY"))
 	if baseCurrency == "" {
 		baseCurrency = "USDT"
 	}
-	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=spot&symbol=%s%s", symbol, baseCurrency)
+	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=spot&symbol=%s%s", strings.ToUpper(symbol), baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
