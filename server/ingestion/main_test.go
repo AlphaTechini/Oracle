@@ -1,52 +1,127 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
 // Tests the event parsing logic present in ingestion/main.go
 func TestParseDataRequestedEvent(t *testing.T) {
-	// The event signature in the smart contract is DataRequested(bytes32,string,string,uint256)
-	// The data segment contains the strings and uint256.
-	// We want to simulate the raw data array received in vLog.Data.
+	tests := []struct {
+		name        string
+		setupBuf    func() []byte
+		wantSymbol  string
+		wantName    string
+		wantErrText string
+	}{
+		{
+			name: "Happy Path",
+			setupBuf: func() []byte {
+				symbolStr := "ETH"
+				nameStr := "Ethereum"
+				dataBuf := make([]byte, 200)
+				dataBuf[95] = byte(len(symbolStr))
+				copy(dataBuf[96:], []byte(symbolStr))
+				nameOffset := 96 + 32*((len(symbolStr)+31)/32) + 31
+				dataBuf[nameOffset] = byte(len(nameStr))
+				copy(dataBuf[nameOffset+1:], []byte(nameStr))
+				return dataBuf
+			},
+			wantSymbol: "ETH",
+			wantName:   "Ethereum",
+		},
+		{
+			name: "Buffer Too Short",
+			setupBuf: func() []byte {
+				return make([]byte, 150) // Less than 160
+			},
+			wantErrText: "dataBuf too short",
+		},
+		{
+			name: "nameOffset out of bounds",
+			setupBuf: func() []byte {
+				// With current implementation logic in main.go, `len(dataBuf) <= nameOffset`
+				// is actually unreachable since max nameOffset is 159 (due to 32 clamping)
+				// and len(dataBuf) is already checked to be >= 160.
+				// Returning nil will skip the test.
+				return nil
+			},
+		},
+		{
+			name: "nameData out of bounds",
+			setupBuf: func() []byte {
+				symbolStr := "ETH"
+				dataBuf := make([]byte, 160)
+				dataBuf[95] = byte(len(symbolStr))
+				nameOffset := 96 + 32*((len(symbolStr)+31)/32) + 31 // 159
+				dataBuf[nameOffset] = 10 // Name length is 10, but buffer is only 160 bytes. nameDataStart + nameLen = 160 + 10 = 170
+				return dataBuf
+			},
+			wantErrText: "nameData out of bounds",
+		},
+		{
+			name: "Symbol Length Clamping (>32)",
+			setupBuf: func() []byte {
+				// We claim the symbol is 50 bytes long, but it should be clamped to 32.
+				symbolStr := strings.Repeat("A", 50)
+				dataBuf := make([]byte, 200)
+				dataBuf[95] = 50 // length > 32
+				copy(dataBuf[96:], []byte(symbolStr)) // Copies 50 bytes
 
-	// Constructing a payload matching the simple parsing logic in ParseDataRequestedEvent.
-	// The function expects the symbol length at byte offset 95 and the symbol string at 96.
-	// Then it expects the name length and string data following 32-byte chunks.
+				// Calculate nameOffset as main.go does, with clamping to 32
+				clampedLen := 32
+				nameOffset := 96 + 32*((clampedLen+31)/32) + 31
+				dataBuf[nameOffset] = 4
+				copy(dataBuf[nameOffset+1:], []byte("Test"))
+				return dataBuf
+			},
+			wantSymbol: strings.Repeat("A", 32), // Should only read 32 bytes
+			wantName:   "Test",
+		},
+		{
+			name: "Empty Strings",
+			setupBuf: func() []byte {
+				dataBuf := make([]byte, 160)
+				dataBuf[95] = 0 // Empty symbol
 
-	symbolStr := "ETH"
-	nameStr := "Ethereum"
-
-	dataBuf := make([]byte, 200) // allocate enough space
-
-	// Put symbol length at 95
-	dataBuf[95] = byte(len(symbolStr))
-
-	// Put symbol string at 96
-	copy(dataBuf[96:], []byte(symbolStr))
-
-	// Calculate nameOffset as main.go does
-	symbolLen := int(dataBuf[95])
-	nameOffset := 96 + 32*((symbolLen+31)/32) + 31
-
-	// Put name length at nameOffset
-	dataBuf[nameOffset] = byte(len(nameStr))
-
-	// Put name string at nameOffset+1
-	copy(dataBuf[nameOffset+1:], []byte(nameStr))
-
-
-	// Test the extracted function ParseDataRequestedEvent
-	symbol, name, err := ParseDataRequestedEvent(dataBuf)
-	if err != nil {
-		t.Fatalf("ParseDataRequestedEvent failed: %v", err)
+				nameOffset := 96 + 32*((0+31)/32) + 31 // 96 + 0 + 31 = 127
+				dataBuf[nameOffset] = 0 // Empty name
+				return dataBuf
+			},
+			wantSymbol: "",
+			wantName:   "",
+		},
 	}
 
-	if symbol != symbolStr {
-		t.Errorf("Expected symbol %s, got %s", symbolStr, symbol)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := tt.setupBuf()
+			if buf == nil {
+				t.Skip("Skipping unreachable test")
+			}
 
-	if name != nameStr {
-		t.Errorf("Expected name %s, got %s", nameStr, name)
+			symbol, name, err := ParseDataRequestedEvent(buf)
+
+			if tt.wantErrText != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErrText)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrText) {
+					t.Errorf("expected error containing %q, got %v", tt.wantErrText, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if symbol != tt.wantSymbol {
+				t.Errorf("Expected symbol %q, got %q", tt.wantSymbol, symbol)
+			}
+			if name != tt.wantName {
+				t.Errorf("Expected name %q, got %q", tt.wantName, name)
+			}
+		})
 	}
 }
