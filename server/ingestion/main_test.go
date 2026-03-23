@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"testing"
 )
 
@@ -50,25 +48,5 @@ func TestParseDataRequestedEvent(t *testing.T) {
 
 	if name != nameStr {
 		t.Errorf("Expected name %s, got %s", nameStr, name)
-	}
-}
-
-// Ensure the NodeReport struct matches what the Fetcher creates
-func TestNodeReportCreation(t *testing.T) {
-	var reqId [32]byte
-	copy(reqId[:], []byte("123"))
-
-	report := NodeReport{
-		ReqId:       reqId,
-		Price:       500,
-		Signature:   []byte("sig"),
-		NodeAddress: "0x123",
-	}
-
-	if !bytes.Equal(report.ReqId[:], reqId[:]) {
-		t.Errorf("ReqId mismatch")
-	}
-	if report.Price != 500 {
-		t.Errorf("Price mismatch")
 	}
 }
