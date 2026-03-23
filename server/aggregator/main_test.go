@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/hex"
-	"sync"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -13,54 +12,67 @@ import (
 // and startConsensusWindow by extracting or replicating it.
 
 func TestSubmitReportLogic(t *testing.T) {
-	// Replicate the logic in SubmitReport and verify mutices and map modifications
-	reports := make(map[string][]NodeReport)
-	timers := make(map[string]bool)
-	var mu sync.Mutex
+	agg := &Aggregator{
+		reports: make(map[string][]NodeReport),
+		timers:  make(map[string]bool),
+		// client and other eth dependencies can be nil for this test
+		// because we are only testing the in-memory tracking logic
+		// before consensus window processing. We also override the
+		// startConsensusWindow to prevent it from running.
+	}
+
+	service := &AggregatorService{agg: agg}
 
 	var reqId [32]byte
 	copy(reqId[:], []byte("req-1"))
 	reqIdHex := hex.EncodeToString(reqId[:])
 
-	submitReport := func(report NodeReport) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		reports[reqIdHex] = append(reports[reqIdHex], report)
+	report1 := NodeReport{ReqId: reqId, Price: 1000, NodeAddress: common.HexToAddress("0x1").Hex()}
+	report2 := NodeReport{ReqId: reqId, Price: 1005, NodeAddress: common.HexToAddress("0x2").Hex()}
 
-		startedTimer := false
-		if !timers[reqIdHex] {
-			timers[reqIdHex] = true
-			startedTimer = true
-		}
-		return startedTimer
+	var reply SubmitResponse
+
+	err := service.SubmitReport(report1, &reply)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	report1 := NodeReport{ReqId: reqId, Price: 1000, NodeAddress: "0x1"}
-	report2 := NodeReport{ReqId: reqId, Price: 1005, NodeAddress: "0x2"}
+	if !reply.Success {
+		t.Errorf("Expected report to be accepted")
+	}
 
-	started := submitReport(report1)
-	if !started {
+	// Because startConsensusWindow runs in a goroutine, there is a race condition
+	// on reading timers. We lock to check state.
+	agg.mu.Lock()
+	startedTimer1 := agg.timers[reqIdHex]
+	agg.mu.Unlock()
+
+	if !startedTimer1 {
 		t.Errorf("Expected timer to start on first report")
 	}
 
-	started = submitReport(report2)
-	if started {
-		t.Errorf("Expected timer NOT to start on second report")
+	err = service.SubmitReport(report2, &reply)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(reports[reqIdHex]) != 2 {
-		t.Errorf("Expected 2 reports, got %d", len(reports[reqIdHex]))
+	agg.mu.Lock()
+	reportsCount := len(agg.reports[reqIdHex])
+	agg.mu.Unlock()
+
+	if reportsCount != 2 {
+		t.Errorf("Expected 2 reports, got %d", reportsCount)
 	}
 }
 
 func TestCalculateConsensus(t *testing.T) {
 	// Tests the extracted CalculateConsensus logic
 	reports := []NodeReport{
-		{Price: 100000, NodeAddress: "0x1"},
-		{Price: 100100, NodeAddress: "0x2"},
-		{Price: 100200, NodeAddress: "0x3"}, // Median will be 100100
-		{Price: 105000, NodeAddress: "0x4"}, // Outlier (slashed) > 0.2% deviation
-		{Price: 99990, NodeAddress: "0x5"},
+		{Price: 100000, NodeAddress: common.HexToAddress("0x1").Hex()},
+		{Price: 100100, NodeAddress: common.HexToAddress("0x2").Hex()},
+		{Price: 100200, NodeAddress: common.HexToAddress("0x3").Hex()}, // Median will be 100100
+		{Price: 105000, NodeAddress: common.HexToAddress("0x4").Hex()}, // Outlier (slashed) > 0.2% deviation
+		{Price: 99990, NodeAddress: common.HexToAddress("0x5").Hex()},
 	}
 
 	networkMedian, honestNodes, slashedNodes := CalculateConsensus(reports)

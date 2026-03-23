@@ -38,16 +38,6 @@ func TestParseDataRequestedEvent(t *testing.T) {
 			wantErrText: "dataBuf too short",
 		},
 		{
-			name: "nameOffset out of bounds",
-			setupBuf: func() []byte {
-				// With current implementation logic in main.go, `len(dataBuf) <= nameOffset`
-				// is actually unreachable since max nameOffset is 159 (due to 32 clamping)
-				// and len(dataBuf) is already checked to be >= 160.
-				// Returning nil will skip the test.
-				return nil
-			},
-		},
-		{
 			name: "nameData out of bounds",
 			setupBuf: func() []byte {
 				symbolStr := "ETH"
@@ -96,9 +86,6 @@ func TestParseDataRequestedEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf := tt.setupBuf()
-			if buf == nil {
-				t.Skip("Skipping unreachable test")
-			}
 
 			symbol, name, err := ParseDataRequestedEvent(buf)
 
