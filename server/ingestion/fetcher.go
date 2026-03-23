@@ -27,14 +27,18 @@ const PriceScale = 100000000
 
 // --- Implementations of PriceSource ---
 
-type BinanceSource struct{}
+type BinanceSource struct{ BaseURL string }
 func (s BinanceSource) Name() string { return "Binance" }
 func (s BinanceSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
 	baseCurrency := strings.ToUpper(os.Getenv("BASE_CURRENCY"))
 	if baseCurrency == "" {
 		baseCurrency = "USDT"
 	}
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker/price?symbol=%s%s", strings.ToUpper(symbol), baseCurrency)
+	baseURL := s.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.binance.com"
+	}
+	url := fmt.Sprintf("%s/api/v3/ticker/price?symbol=%s%s", baseURL, strings.ToUpper(symbol), baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -45,11 +49,15 @@ func (s BinanceSource) FetchPrice(ctx context.Context, symbol string) (float64, 
 	return price, nil
 }
 
-type BitfinexSource struct{}
+type BitfinexSource struct{ BaseURL string }
 func (s BitfinexSource) Name() string { return "Bitfinex" }
 func (s BitfinexSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
 	// Bitfinex uses USD for spot, symbols prefixed with 't'
-	url := fmt.Sprintf("https://api-pub.bitfinex.com/v2/ticker/t%sUSD", strings.ToUpper(symbol))
+	baseURL := s.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api-pub.bitfinex.com"
+	}
+	url := fmt.Sprintf("%s/v2/ticker/t%sUSD", baseURL, strings.ToUpper(symbol))
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -59,10 +67,14 @@ func (s BitfinexSource) FetchPrice(ctx context.Context, symbol string) (float64,
 	return data[6].(float64), nil
 }
 
-type CoinbaseSource struct{}
+type CoinbaseSource struct{ BaseURL string }
 func (s CoinbaseSource) Name() string { return "Coinbase" }
 func (s CoinbaseSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
-	url := fmt.Sprintf("https://api.coinbase.com/v2/prices/%s-USD/spot", strings.ToUpper(symbol))
+	baseURL := s.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.coinbase.com"
+	}
+	url := fmt.Sprintf("%s/v2/prices/%s-USD/spot", baseURL, strings.ToUpper(symbol))
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -75,6 +87,7 @@ func (s CoinbaseSource) FetchPrice(ctx context.Context, symbol string) (float64,
 
 type CoinGeckoSource struct{
 	TokenName string
+	BaseURL   string
 }
 func (s CoinGeckoSource) Name() string { return "CoinGecko" }
 func (s CoinGeckoSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
@@ -84,7 +97,11 @@ func (s CoinGeckoSource) FetchPrice(ctx context.Context, symbol string) (float64
 		id = strings.ToLower(symbol)
 	}
 	
-	url := fmt.Sprintf("https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd", id)
+	baseURL := s.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.coingecko.com"
+	}
+	url := fmt.Sprintf("%s/api/v3/simple/price?ids=%s&vs_currencies=usd", baseURL, id)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -97,14 +114,18 @@ func (s CoinGeckoSource) FetchPrice(ctx context.Context, symbol string) (float64
 	return 0, fmt.Errorf("id %s not found in coingecko response", id)
 }
 
-type BybitSource struct{}
+type BybitSource struct{ BaseURL string }
 func (s BybitSource) Name() string { return "Bybit" }
 func (s BybitSource) FetchPrice(ctx context.Context, symbol string) (float64, error) {
 	baseCurrency := strings.ToUpper(os.Getenv("BASE_CURRENCY"))
 	if baseCurrency == "" {
 		baseCurrency = "USDT"
 	}
-	url := fmt.Sprintf("https://api.bybit.com/v5/market/tickers?category=spot&symbol=%s%s", strings.ToUpper(symbol), baseCurrency)
+	baseURL := s.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.bybit.com"
+	}
+	url := fmt.Sprintf("%s/v5/market/tickers?category=spot&symbol=%s%s", baseURL, strings.ToUpper(symbol), baseCurrency)
 	resp, err := http.Get(url)
 	if err != nil { return 0, err }
 	defer resp.Body.Close()
@@ -125,6 +146,11 @@ func FetchMedian(symbol string, name string) uint64 {
 		CoinGeckoSource{TokenName: name}, 
 		BybitSource{},
 	}
+	return FetchMedianWithSources(symbol, name, sources)
+}
+
+// FetchMedianWithSources allows injecting custom sources for testing
+func FetchMedianWithSources(symbol string, name string, sources []PriceSource) uint64 {
 	var prices []float64
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

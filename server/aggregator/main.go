@@ -114,6 +114,19 @@ func (a *Aggregator) startConsensusWindow(reqId [32]byte) {
 		return
 	}
 
+	networkMedian, honestNodes, slashedNodes := CalculateConsensus(reports)
+
+	// Submit Transaction to Blockchain
+	a.submitToBlockchain(reqId, networkMedian, honestNodes, slashedNodes)
+}
+
+// CalculateConsensus calculates the median price from reports and categorizes nodes as honest or slashed
+// based on a 0.2% deviation limit. Extracted for testability.
+func CalculateConsensus(reports []NodeReport) (uint64, []common.Address, []common.Address) {
+	if len(reports) == 0 {
+		return 0, nil, nil
+	}
+
 	// 1. Sort prices to find Median
 	prices := make([]uint64, len(reports))
 	for i, r := range reports {
@@ -138,8 +151,7 @@ func (a *Aggregator) startConsensusWindow(reqId [32]byte) {
 		}
 	}
 
-	// 3. Submit Transaction to Blockchain
-	a.submitToBlockchain(reqId, networkMedian, honestNodes, slashedNodes)
+	return networkMedian, honestNodes, slashedNodes
 }
 
 func (a *Aggregator) submitToBlockchain(reqId [32]byte, median uint64, honest []common.Address, slashed []common.Address) {

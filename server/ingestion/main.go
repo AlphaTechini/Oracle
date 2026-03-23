@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/rpc"
 	"os"
@@ -13,6 +14,42 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+// ParseDataRequestedEvent extracts the symbol and name strings from the raw event data bytes
+func ParseDataRequestedEvent(dataBuf []byte) (string, string, error) {
+	// Note: The fully unABI-decoded symbol and name are stored in the data segment.
+	// The data layout for (string symbol, string name, uint256 bounty) is:
+	// [0:32] symbol offset
+	// [32:64] name offset
+	// [64:96] bounty
+	// [96:128] symbol length
+	// [128:...] symbol data (padded)
+	// [...] name length
+	// [...] name data (padded)
+
+	if len(dataBuf) < 160 {
+		return "", "", fmt.Errorf("dataBuf too short")
+	}
+
+	// Simple parse for short strings (assuming they fit within the first few slots)
+	symbolLen := int(dataBuf[95])
+	if symbolLen > 32 { symbolLen = 32 } // sanity check for simple parse
+	symbol := string(dataBuf[96 : 96+symbolLen])
+
+	// Name starts after symbol padding (32-byte chunks)
+	nameOffset := 96 + 32*((symbolLen+31)/32) + 31
+	if len(dataBuf) <= nameOffset {
+		return "", "", fmt.Errorf("nameOffset out of bounds")
+	}
+	nameLen := int(dataBuf[nameOffset])
+	nameDataStart := nameOffset + 1
+	if len(dataBuf) < nameDataStart+nameLen {
+		return "", "", fmt.Errorf("nameData out of bounds")
+	}
+	name := string(dataBuf[nameDataStart : nameDataStart+nameLen])
+
+	return symbol, name, nil
+}
 
 // Shared types with the Aggregator for net/rpc
 type NodeReport struct {
@@ -99,37 +136,11 @@ func main() {
 			}
 			reqId := vLog.Topics[1]
 
-			// Note: The fully unABI-decoded symbol and name are stored in the data segment.
-			// The data layout for (string symbol, string name, uint256 bounty) is:
-			// [0:32] symbol offset
-			// [32:64] name offset
-			// [64:96] bounty
-			// [96:128] symbol length
-			// [128:...] symbol data (padded)
-			// [...] name length
-			// [...] name data (padded)
-			
-			dataBuf := vLog.Data
-			if len(dataBuf) < 160 {
+			symbol, name, err := ParseDataRequestedEvent(vLog.Data)
+			if err != nil {
+				log.Printf("Failed to parse event: %v", err)
 				continue
 			}
-			
-			// Simple parse for short strings (assuming they fit within the first few slots)
-			symbolLen := int(dataBuf[95])
-			if symbolLen > 32 { symbolLen = 32 } // sanity check for simple parse
-			symbol := string(dataBuf[96 : 96+symbolLen])
-
-			// Name starts after symbol padding (32-byte chunks)
-			nameOffset := 96 + 32*((symbolLen+31)/32) + 31
-			if len(dataBuf) <= nameOffset {
-				continue
-			}
-			nameLen := int(dataBuf[nameOffset])
-			nameDataStart := nameOffset + 1
-			if len(dataBuf) < nameDataStart+nameLen {
-				continue
-			}
-			name := string(dataBuf[nameDataStart : nameDataStart+nameLen])
 
 			log.Printf("Received Request! ReqId: %x, Symbol: %s, Name: %s", reqId.Bytes(), symbol, name)
 
