@@ -12,13 +12,17 @@ import (
 // and startConsensusWindow by extracting or replicating it.
 
 func TestSubmitReportLogic(t *testing.T) {
+	hookCalled := make(chan bool, 1)
+
 	agg := &Aggregator{
 		reports: make(map[string][]NodeReport),
 		timers:  make(map[string]bool),
 		// client and other eth dependencies can be nil for this test
 		// because we are only testing the in-memory tracking logic
-		// before consensus window processing. We also override the
-		// startConsensusWindow to prevent it from running.
+		// before consensus window processing.
+		startConsensusHook: func(reqId [32]byte) {
+			hookCalled <- true
+		},
 	}
 
 	service := &AggregatorService{agg: agg}
@@ -41,14 +45,15 @@ func TestSubmitReportLogic(t *testing.T) {
 		t.Errorf("Expected report to be accepted")
 	}
 
-	// Because startConsensusWindow runs in a goroutine, there is a race condition
-	// on reading timers. We lock to check state.
+	// Wait a tiny bit for the goroutine to write to the channel
+	<-hookCalled
+
 	agg.mu.Lock()
 	startedTimer1 := agg.timers[reqIdHex]
 	agg.mu.Unlock()
 
 	if !startedTimer1 {
-		t.Errorf("Expected timer to start on first report")
+		t.Errorf("Expected timer state to be true on first report")
 	}
 
 	err = service.SubmitReport(report2, &reply)
@@ -90,7 +95,7 @@ func TestCalculateConsensus(t *testing.T) {
 	}
 
 	if len(slashedNodes) != 1 {
-		t.Errorf("Expected 1 slashed node, got %d", len(slashedNodes))
+		t.Fatalf("Expected 1 slashed node, got %d", len(slashedNodes))
 	}
 
 	slashedAddr := common.HexToAddress("0x4")

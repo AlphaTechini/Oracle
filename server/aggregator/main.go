@@ -36,13 +36,14 @@ type SubmitResponse struct {
 }
 
 type Aggregator struct {
-	mu            sync.Mutex
-	reports       map[string][]NodeReport // hex(reqId) -> reports
-	timers        map[string]bool         // keeps track if a timer is already running for reqId
-	client        *ethclient.Client
-	registryAddr  common.Address
-	privateKey    *ecdsa.PrivateKey
-	contractABI   abi.ABI
+	mu                 sync.Mutex
+	reports            map[string][]NodeReport // hex(reqId) -> reports
+	timers             map[string]bool         // keeps track if a timer is already running for reqId
+	client             *ethclient.Client
+	registryAddr       common.Address
+	privateKey         *ecdsa.PrivateKey
+	contractABI        abi.ABI
+	startConsensusHook func([32]byte) // For testing: overrides startConsensusWindow goroutine
 }
 
 func NewAggregator(rpcURL, registryAddrHex, privKeyHex string) (*Aggregator, error) {
@@ -88,7 +89,12 @@ func (s *AggregatorService) SubmitReport(report NodeReport, reply *SubmitRespons
 	// If this is the FIRST report for this Request ID, start the 3-second Consensus Timer
 	if !s.agg.timers[reqIdHex] {
 		s.agg.timers[reqIdHex] = true
-		go s.agg.startConsensusWindow(report.ReqId)
+
+		if s.agg.startConsensusHook != nil {
+			go s.agg.startConsensusHook(report.ReqId)
+		} else {
+			go s.agg.startConsensusWindow(report.ReqId)
+		}
 	}
 	s.agg.mu.Unlock()
 
