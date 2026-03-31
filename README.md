@@ -7,16 +7,16 @@ This project is a refactor of my original single-node oracle into a robust, mult
 The system is split into three main layers: the On-Chain settlement, the Off-Chain data ingestion, and the Aggregation layer that bridges them.
 
 ```mermaid
-graph TD
-    subgraph "Clients"
+flowchart TD
+    subgraph Clients
         Web[Web2 Clients / UI]
     end
 
-    subgraph "API Gateway (Node.js)"
+    subgraph Gateway ["API Gateway (Node.js)"]
         Dispatcher[Dispatcher API]
     end
 
-    subgraph "External Data Sources (APIs)"
+    subgraph Sources ["External Data Sources (APIs)"]
         B[Binance]
         BF[Bitfinex]
         CB[Coinbase]
@@ -24,25 +24,47 @@ graph TD
         BY[Bybit]
     end
 
-    subgraph "Oracle Network (Go Nodes)"
+    subgraph Network ["Oracle Network (Go Nodes)"]
         NodeA[Fetcher Node A]
         NodeB[Fetcher Node B]
         NodeC[Fetcher Node C]
     end
 
-    subgraph "Aggregation & Consensus"
+    subgraph Consensus ["Aggregation & Consensus"]
         Aggregator[Rotating Aggregator]
     end
 
-    subgraph "On-Chain (Solidity)"
+    subgraph OnChain ["On-Chain (Solidity)"]
         Registry[Oracle Registry Contract]
     end
 
     Web -- "/request" --> Dispatcher
     Dispatcher -- "requestData()" --> Registry
-    B & BF & CB & CG & BY --> NodeA & NodeB & NodeC
-    Registry -. "Event: DataRequested" .-> NodeA & NodeB & NodeC
-    NodeA & NodeB & NodeC -- "Signed Medians" --> Aggregator
+
+    B --> NodeA
+    B --> NodeB
+    B --> NodeC
+    BF --> NodeA
+    BF --> NodeB
+    BF --> NodeC
+    CB --> NodeA
+    CB --> NodeB
+    CB --> NodeC
+    CG --> NodeA
+    CG --> NodeB
+    CG --> NodeC
+    BY --> NodeA
+    BY --> NodeB
+    BY --> NodeC
+
+    Registry -. "Event: DataRequested" .-> NodeA
+    Registry -. "Event: DataRequested" .-> NodeB
+    Registry -. "Event: DataRequested" .-> NodeC
+
+    NodeA -- "Signed Medians" --> Aggregator
+    NodeB -- "Signed Medians" --> Aggregator
+    NodeC -- "Signed Medians" --> Aggregator
+
     Aggregator -- "fulfillRequest()" --> Registry
     Registry -. "Event: RequestFulfilled" .-> Dispatcher
     Dispatcher -- "/subscribe (SSE)" --> Web
